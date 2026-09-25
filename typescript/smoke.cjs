@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { buildVoronoiHull, Scratch, MeshBuffer } = require("./dist/voronoiHull.js");
+const { buildVoronoiHull, buildVoronoiHullFromSites, VoronoiWorkspace, Scratch, MeshBuffer } = require("./dist/voronoiHull.js");
 
 // Eight tetrahedra fill an octahedron around the center site. Its Voronoi cell is a cube.
 const sites = new Float32Array([0,0,0, 1,0,0, -1,0,0, 0,1,0, 0,-1,0, 0,0,1, 0,0,-1]);
@@ -33,4 +33,22 @@ assert.equal(mesh.indexCount, 30);
 input.emitCell = new Uint8Array(7);
 buildVoronoiHull(input, scratch, mesh);
 assert.equal(mesh.indexCount, 0);
+
+// The direct site-cloud path includes Delaunay tetrahedralization.
+const genericSites = new Float64Array([0,0,0, 1,0.03,0.02, -1.17,0.01,-0.03,
+  0.02,1.19,0.04, -0.02,-0.94,0.01, 0.01,-0.02,1.08, -0.02,0.03,-1.26]);
+const workspace = new VoronoiWorkspace();
+const genericFilled = new Uint8Array([1,0,0,0,0,0,0]);
+buildVoronoiHullFromSites(genericSites, genericFilled, workspace);
+assert.equal(workspace.delaunay.tetrahedronCount, 8);
+assert.equal(workspace.mesh.vertexCount, 24);
+assert.equal(workspace.mesh.indexCount, 36);
+const tetsBuffer = workspace.delaunay.tetrahedra;
+const positionsBuffer = workspace.mesh.positions;
+buildVoronoiHullFromSites(genericSites, genericFilled, workspace);
+assert.equal(workspace.delaunay.tetrahedra, tetsBuffer);
+assert.equal(workspace.mesh.positions, positionsBuffer);
+genericFilled[1] = 1;
+buildVoronoiHullFromSites(genericSites, genericFilled, workspace);
+assert.equal(workspace.mesh.indexCount, 30);
 console.log("TypeScript smoke checks passed");

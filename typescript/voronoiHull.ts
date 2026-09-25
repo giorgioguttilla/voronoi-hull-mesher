@@ -1,3 +1,5 @@
+import { buildDelaunay3D, DelaunayResult, DelaunayScratch } from "./delaunay3d";
+
 /** Flat xyz positions, flat abcd tetrahedra, and one xyz circumcenter per tetrahedron. */
 export interface VoronoiInput {
   sites: ArrayLike<number>;
@@ -6,6 +8,7 @@ export interface VoronoiInput {
   filled: ArrayLike<number>; // 0 = empty, nonzero = filled
   emitCell?: ArrayLike<number>; // optional ownership mask for chunked output
   duplicateEpsilon?: number;
+  tetrahedronCount?: number; // for reusable grow-only Delaunay output arrays
 }
 
 /** Reused output. Only positions/normals[0..vertexCount*3) and indices[0..indexCount) are valid. */
@@ -91,6 +94,26 @@ export class Scratch {
   }
 }
 
+/** All reusable storage for point-cloud-to-hull builds. */
+export class VoronoiWorkspace {
+  readonly delaunayScratch = new DelaunayScratch();
+  readonly delaunay = new DelaunayResult();
+  readonly hullScratch = new Scratch();
+  readonly mesh = new MeshBuffer();
+}
+
+/** Build the exposed Voronoi hull directly from site positions and a filled mask. */
+export function buildVoronoiHullFromSites(
+  sites: ArrayLike<number>, filled: ArrayLike<number>, workspace: VoronoiWorkspace,
+  emitCell?: ArrayLike<number>, duplicateEpsilon = 1e-5
+): MeshBuffer {
+  buildDelaunay3D(sites, workspace.delaunayScratch, workspace.delaunay);
+  // Avoid allocating an options object in the steady-state path.
+  return buildVoronoiHullCore(sites, workspace.delaunay.tetrahedra,
+    workspace.delaunay.circumcenters, filled, workspace.hullScratch, workspace.mesh,
+    workspace.delaunay.tetrahedronCount, emitCell, duplicateEpsilon);
+}
+
 function grow(oldSize: number, needed: number): number {
   let size = Math.max(16, oldSize);
   while (size < needed) size *= 2;
@@ -168,15 +191,23 @@ function isClosed(s: Scratch, face: number, tets: ArrayLike<number>): boolean {
  * solver is included. Reuse scratch and mesh for allocation-free steady-state builds.
  */
 export function buildVoronoiHull(input: VoronoiInput, scratch: Scratch, mesh: MeshBuffer): MeshBuffer {
-  const { sites, tetrahedra: tets, circumcenters: centers, filled, emitCell } = input;
-  if (sites.length % 3 || tets.length % 4 || centers.length !== tets.length / 4 * 3 ||
+  return buildVoronoiHullCore(input.sites, input.tetrahedra, input.circumcenters,
+    input.filled, scratch, mesh, input.tetrahedronCount ?? input.tetrahedra.length / 4,
+    input.emitCell, input.duplicateEpsilon ?? 1e-5);
+}
+
+function buildVoronoiHullCore(
+  sites: ArrayLike<number>, tets: ArrayLike<number>, centers: ArrayLike<number>,
+  filled: ArrayLike<number>, scratch: Scratch, mesh: MeshBuffer, tetCount: number,
+  emitCell?: ArrayLike<number>, epsilon = 1e-5
+): MeshBuffer {
+  if (sites.length % 3 || tets.length % 4 || !Number.isInteger(tetCount) || tetCount < 0 ||
+      tetCount * 4 > tets.length || tetCount * 3 > centers.length ||
       filled.length !== sites.length / 3 || (emitCell && emitCell.length !== filled.length))
     throw new RangeError("Input array lengths do not match");
-  const epsilon = input.duplicateEpsilon ?? 1e-5;
   if (epsilon < 0) throw new RangeError("duplicateEpsilon must be nonnegative");
   const epsilonSq = epsilon * epsilon;
   const siteCount = sites.length / 3;
-  const tetCount = tets.length / 4;
   mesh.vertexCount = mesh.indexCount = 0;
   scratch.reset(tetCount * 6);
 

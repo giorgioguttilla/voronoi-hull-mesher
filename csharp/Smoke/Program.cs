@@ -33,6 +33,25 @@ VoronoiHull.Build(sites, tets, centers, filled, scratch, mesh);
 Check(mesh.VertexCount == 20 && mesh.IndexCount == 30, "occluded face culling");
 VoronoiHull.Build(sites, tets, centers, filled, scratch, mesh, new bool[7]);
 Check(mesh.IndexCount == 0, "ownership mask");
+
+// The direct site-cloud path includes Delaunay tetrahedralization.
+var genericSites = new[] { Vector3.Zero, new Vector3(1, .03f, .02f),
+    new Vector3(-1.17f, .01f, -.03f), new Vector3(.02f, 1.19f, .04f),
+    new Vector3(-.02f, -.94f, .01f), new Vector3(.01f, -.02f, 1.08f),
+    new Vector3(-.02f, .03f, -1.26f) };
+var genericFilled = new bool[7]; genericFilled[0] = true;
+var workspace = new VoronoiWorkspace();
+VoronoiHull.BuildFromSites(genericSites, genericFilled, workspace);
+Check(workspace.Delaunay.Count == 8 && workspace.Mesh.VertexCount == 24 && workspace.Mesh.IndexCount == 36,
+    "point cloud to hull");
+var originalTets = workspace.Delaunay.Tetrahedra;
+var genericPositions = workspace.Mesh.Positions;
+VoronoiHull.BuildFromSites(genericSites, genericFilled, workspace);
+Check(ReferenceEquals(workspace.Delaunay.Tetrahedra, originalTets) &&
+    ReferenceEquals(workspace.Mesh.Positions, genericPositions), "pipeline buffer reuse");
+genericFilled[1] = true;
+VoronoiHull.BuildFromSites(genericSites, genericFilled, workspace);
+Check(workspace.Mesh.IndexCount == 30, "pipeline occluded face culling");
 Console.WriteLine("C# smoke checks passed");
 
 static void Check(bool condition, string description)

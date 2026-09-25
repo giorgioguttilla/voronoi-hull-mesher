@@ -83,17 +83,19 @@ namespace VoronoiHullStandalone
         public static MeshBuffer Build(
             Vector3[] sites, Tetrahedron[] tetrahedra, Vector3[] circumcenters,
             bool[] filled, Scratch scratch, MeshBuffer mesh, bool[] emitCell = null,
-            float duplicateEpsilon = 1e-5f)
+            float duplicateEpsilon = 1e-5f, int tetrahedronCount = -1)
         {
             if (sites == null || tetrahedra == null || circumcenters == null || filled == null || scratch == null || mesh == null)
                 throw new ArgumentNullException("Build inputs cannot be null");
-            if (sites.Length != filled.Length || (emitCell != null && emitCell.Length != sites.Length) || tetrahedra.Length != circumcenters.Length)
+            if (tetrahedronCount < 0) tetrahedronCount = tetrahedra.Length;
+            if (sites.Length != filled.Length || (emitCell != null && emitCell.Length != sites.Length) ||
+                tetrahedronCount > tetrahedra.Length || tetrahedronCount > circumcenters.Length)
                 throw new ArgumentException("Input array lengths do not match");
             if (duplicateEpsilon < 0) throw new ArgumentOutOfRangeException(nameof(duplicateEpsilon));
 
             mesh.VertexCount = mesh.IndexCount = 0;
-            scratch.Reset(checked(tetrahedra.Length * 6));
-            for (int t = 0; t < tetrahedra.Length; t++)
+            scratch.Reset(checked(tetrahedronCount * 6));
+            for (int t = 0; t < tetrahedronCount; t++)
             {
                 Tetrahedron tet = tetrahedra[t];
                 CheckSite(tet.A, sites.Length); CheckSite(tet.B, sites.Length);
@@ -181,6 +183,28 @@ namespace VoronoiHullStandalone
             return mesh;
         }
 
+        /// <summary>Point cloud to exposed Voronoi hull in one call. Reuse every workspace and output.</summary>
+        public static MeshBuffer BuildFromSites(
+            Vector3[] sites, bool[] filled, DelaunayScratch delaunayScratch,
+            DelaunayResult delaunay, Scratch hullScratch, MeshBuffer mesh,
+            bool[] emitCell = null, float duplicateEpsilon = 1e-5f)
+        {
+            Delaunay3D.Build(sites, delaunayScratch, delaunay);
+            return Build(sites, delaunay.Tetrahedra, delaunay.Circumcenters,
+                filled, hullScratch, mesh, emitCell, duplicateEpsilon, delaunay.Count);
+        }
+
+        /// <summary>Point cloud to exposed Voronoi hull using a single reusable workspace.</summary>
+        public static MeshBuffer BuildFromSites(
+            Vector3[] sites, bool[] filled, VoronoiWorkspace workspace,
+            bool[] emitCell = null, float duplicateEpsilon = 1e-5f)
+        {
+            if (workspace == null) throw new ArgumentNullException(nameof(workspace));
+            return BuildFromSites(sites, filled, workspace.DelaunayScratch,
+                workspace.Delaunay, workspace.HullScratch, workspace.Mesh,
+                emitCell, duplicateEpsilon);
+        }
+
         private static void CheckSite(int index, int count)
         {
             if ((uint)index >= (uint)count) throw new ArgumentOutOfRangeException(nameof(index), "Tetrahedron site index is out of range");
@@ -242,5 +266,14 @@ namespace VoronoiHullStandalone
             if (t.D != a && t.D != b) { if (count++ == 0) c = t.D; else d = t.D; }
             return count == 2 && c != d;
         }
+    }
+
+    /// <summary>All reusable storage for point-cloud-to-hull builds.</summary>
+    public sealed class VoronoiWorkspace
+    {
+        public readonly DelaunayScratch DelaunayScratch = new DelaunayScratch();
+        public readonly DelaunayResult Delaunay = new DelaunayResult();
+        public readonly Scratch HullScratch = new Scratch();
+        public readonly MeshBuffer Mesh = new MeshBuffer();
     }
 }
